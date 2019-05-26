@@ -1,0 +1,4 @@
+"0","if(!dir.exists('train'))"
+"0","  unzip('train.zip', exdir = 'train')"
+"0","if(!dir.exists('test')) "
+"0","  unzip('test.zip', exdir = 'test')"

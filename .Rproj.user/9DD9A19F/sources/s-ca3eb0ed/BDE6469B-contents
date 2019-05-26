@@ -1,0 +1,196 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(keras)
+library(tidyverse)
+library(imager)
+library(readr)
+```
+
+# Download the Data
+```{bash}
+echo kaggle competitions download -c recognizing-faces-in-the-wild
+```
+
+```{r, echo = FALSE}
+if(!dir.exists('train'))
+  unzip('train.zip', exdir = 'train')
+if(!dir.exists('test')) 
+  unzip('test.zip', exdir = 'test')
+```
+
+# Create the Model
+```{r}
+parent_input <- layer_input(shape = c(224, 224, 3), 
+                            name = 'parent_input')
+
+child_input <- layer_input(shape = c(224, 224, 3), 
+                           name = 'child_input')
+ 
+parent <-parent_input %>% 
+  layer_conv_2d(filters = 32,
+                kernel_size = c(3, 3),
+                activation = 'relu') %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_conv_2d(filters = 64, 
+                kernel_size = c(3, 3),
+                activation = "relu",) %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_conv_2d(filters = 128, 
+                kernel_size = c(3, 3),
+                activation = "relu",) %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_conv_2d(filters = 128, 
+                kernel_size = c(3, 3),
+                activation = "relu",) %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_flatten()
+
+child <- child_input %>% 
+  layer_conv_2d(filters = 32,
+                kernel_size = c(3, 3),
+                activation = 'relu') %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_conv_2d(filters = 64, 
+                kernel_size = c(3, 3),
+                activation = "relu",) %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_conv_2d(filters = 128, 
+                kernel_size = c(3, 3),
+                activation = "relu",) %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_conv_2d(filters = 128, 
+                kernel_size = c(3, 3),
+                activation = "relu",) %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_flatten()
+
+predictions <- layer_concatenate(c(parent, child)) %>%
+  layer_dropout(rate = 0.5) %>%
+  layer_dense(units = 512, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+model <- keras_model(inputs = c(parent_input, child_input), 
+                     outputs = predictions)
+
+
+model %>% compile(
+  optimizer = optimizer_rmsprop(lr = 1e-4),
+  loss = 'binary_crossentropy',
+  metrics = c('accuracy')
+)
+```
+
+
+# Read in CSV of kinship linking
+
+```{r}
+relationships <- read_csv('train_relationships.csv') %>% 
+  mutate(label = 1)
+
+non_kin_relationship = tibble(
+  p1 = sample(relationships$p1),
+  p2 = sample(relationships$p2),
+  label = 0
+)
+
+relationships = bind_rows(
+  relationships,
+  non_kin_relationship
+)
+```
+
+```{r}
+relationships <-  relationships %>% 
+  mutate(
+    p1 = file.path(getwd(), 'train', p1),
+    p2 = file.path(getwd(), 'train', p2)
+  ) %>% 
+  filter(dir.exists(p1),
+         dir.exists(p2))
+```
+
+```{r}
+datagen <- image_data_generator(
+  rescale = 1/255,
+  rotation_range = 40,
+  width_shift_range = 0.2,
+  height_shift_range = 0.2,
+  shear_range = 0.2,
+  zoom_range = 0.2,
+  horizontal_flip = TRUE
+)
+```
+
+```{r}
+generate_pair <- function(relationships) {
+  
+  random_sample <- 
+    sample(x = 1:nrow(relationships), replace = TRUE, size = 1)
+
+  parent_sample <- relationships$p1[[random_sample]]
+  child_sample <- relationships$p2[[random_sample]]
+  kin_or_not <- relationships$label[[random_sample]]
+  
+  random_family <- map2(
+    parent_sample,
+    child_sample,
+    function(parent_dir, child_dir) {
+    
+      c(parent_dir, child_dir) %>% 
+      map(
+        function(x) {
+          next_path <- file.path(x, list.files(x)) %>% 
+            sample(size = 1) 
+          
+          
+          next_path <- 
+            next_path%>% 
+            map(load.image) 
+          
+          next_path <- 
+            next_path %>% 
+            map(as.array) %>% 
+            array_reshape(
+              c(1, 224, 224, 3)
+            )
+        }
+      )   
+    }
+  ) %>% .[[1]] 
+  
+  list(
+    image_pair = random_family,
+    label = kin_or_not 
+  )
+}
+
+```
+
+```{r}
+
+for(i in 1:10000) {
+  print(i)
+  kin_image <- generate_pair(relationships)
+  model %>% fit(kin_image$image_pair, 
+                kin_image$label, 
+                epochs = 1)
+  
+  if (i%%200 == 0) {
+    message("Generating Test Set")
+    n_samps <- 50
+    result_vector <- vector(mode = "logical", length = n_samps)
+    for(j in 1:n_samps) {
+      kin_image <- generate_pair(relationships)
+      actual = kin_image$label
+      prediction = round(predict(model, kin_image$image_pair))
+      result_vector[[j]] = prediction[[1]] == actual
+    }
+    message("Test sample: ", sum(result_vector)/length(result_vector))
+  }
+  
+}
+```
