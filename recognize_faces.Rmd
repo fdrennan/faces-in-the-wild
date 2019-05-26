@@ -105,12 +105,19 @@ relationships = bind_rows(
 
 ```{r}
 relationships <-  relationships %>% 
+  mutate(row_num = row_number()) %>% 
+  group_by(row_num) %>% 
   mutate(
     p1 = file.path(getwd(), 'train', p1),
-    p2 = file.path(getwd(), 'train', p2)
+    p2 = file.path(getwd(), 'train', p2),
+    n_files_p1 = length(list.files(p1)),
+    n_files_p2 = length(list.files(p2))
   ) %>% 
   filter(dir.exists(p1),
-         dir.exists(p2))
+         dir.exists(p2),
+         n_files_p1 >= 1,
+         n_files_p2 >= 1) %>% 
+  ungroup
 ```
 
 ```{r}
@@ -168,26 +175,36 @@ generate_pair <- function(relationships) {
   )
 }
 
+generate_epoch <- 
+  function(n_images = 50) {
+    trainers <- lapply(1:n_images, function(x) generate_pair(relationships))
+    parent_pics <<- map(trainers, function(x) x$image_pair[[1]]) %>% 
+      array_reshape(c(n_images, 224, 224, 3))
+    child_pics <<- map(trainers, function(x) x$image_pair[[2]]) %>% 
+      array_reshape(c(n_images, 224, 224, 3))
+    labs <<- unlist(map(trainers, function(x) x$label))
+  
+  }
 ```
 
 ```{r}
 
-for(i in 1:10000) {
+
+for(i in 1:100) {
   print(i)
-  kin_image <- generate_pair(relationships)
-  model %>% fit(kin_image$image_pair, 
-                kin_image$label, 
+  generate_epoch()
+  model %>% fit(list(parent_pics, child_pics), 
+                labs, 
                 epochs = 1)
   
-  if (i%%200 == 0) {
+  if (i%%50 == 0) {
     message("Generating Test Set")
     n_samps <- 50
     result_vector <- vector(mode = "logical", length = n_samps)
     for(j in 1:n_samps) {
-      kin_image <- generate_pair(relationships)
-      actual = kin_image$label
-      prediction = round(predict(model, kin_image$image_pair))
-      result_vector[[j]] = prediction[[1]] == actual
+      generate_epoch()
+      prediction = round(predict(model, list(parent_pics, child_pics)))
+      result_vector[[j]] = prediction[[1]] == labs
     }
     message("Test sample: ", sum(result_vector)/length(result_vector))
   }
