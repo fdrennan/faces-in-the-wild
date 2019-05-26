@@ -1,7 +1,0 @@
-"0","relationships <-  relationships %>% "
-"0","  mutate("
-"0","    p1 = file.path(getwd(), 'train', p1),"
-"0","    p2 = file.path(getwd(), 'train', p2)"
-"0","  ) %>% "
-"0","  filter(dir.exists(p1),"
-"0","         dir.exists(p2))"

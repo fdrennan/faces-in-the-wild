@@ -1,9 +1,0 @@
-{
-    "path" : "~/projects/faces-in-the-wild/train",
-    "sortOrder" : [
-        {
-            "ascending" : true,
-            "columnIndex" : 2
-        }
-    ]
-}
